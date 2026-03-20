@@ -1,14 +1,12 @@
 """
-Trafik işareti tanıma — GTSRB'ye özel derin CNN.
+Trafik isareti tanima — GTSRB'ye ozel derin CNN v2.
 
-Sıfırdan eğitilen bu model transfer learning'e göre çok daha
-iyi sonuç verir çünkü:
-  1) Trafik işaretleri ImageNet'ten tamamen farklı bir domain'dir.
-  2) 26K eğitim örneği özel bir CNN için yeterlidir.
-  3) Küçük geometrik özellikler (şekil, renk, numara) için
-     özel mimari daha avantajlıdır.
+Guncellemeler (v2):
+  - he_normal kernel initializer (daha stabil egitim)
+  - SpatialDropout2D (feature map bazli regularizasyon)
+  - 3 blok + kademeli filtre artisi
 
-Beklenen doğruluk: %95–99 (GTSRB benchmark)
+Beklenen dogruluk: %97-99 (GTSRB benchmark)
 """
 
 import sys
@@ -25,60 +23,61 @@ def build_model(
     num_classes,
     img_size,
     learning_rate: float = 1e-3,
-) -> keras.Model:
-    """VGG-stili özel CNN — GTSRB için optimize edilmiştir.
+):
+    """Gelistirilmis VGG-stili ozel CNN v2.
 
-    Mimari (48×48 giriş için):
-        [Conv3×3(64)×2 + BN + MaxPool + Dropout(0.25)] × 3
+    Mimari (48x48 giris):
+        [Conv3x3(64)x2 + BN + MaxPool + SpatialDropout(0.15)]
+        [Conv3x3(128)x2 + BN + MaxPool + SpatialDropout(0.2)]
+        [Conv3x3(256)x2 + BN + MaxPool + SpatialDropout(0.25)]
         → GlobalAveragePooling
         → Dense(512, relu) + BN + Dropout(0.5)
         → Dense(num_classes, softmax)
 
-    Toplam ~1.2M parametre, eğitilebilir.
+    ~1.5M parametre, tamami egitilebilir.
     """
     input_shape = (*img_size, 3)
-
     inp = keras.Input(shape=input_shape, name="input_image")
 
-    # Blok 1  ─────────────────────────────────────────────────────────────────
-    x = layers.Conv2D(64, 3, padding="same", name="conv1a")(inp)
+    # Blok 1: 48→24
+    x = layers.Conv2D(64, 3, padding="same", kernel_initializer="he_normal", name="conv1a")(inp)
     x = layers.BatchNormalization(name="bn1a")(x)
     x = layers.Activation("relu")(x)
-    x = layers.Conv2D(64, 3, padding="same", name="conv1b")(x)
+    x = layers.Conv2D(64, 3, padding="same", kernel_initializer="he_normal", name="conv1b")(x)
     x = layers.BatchNormalization(name="bn1b")(x)
     x = layers.Activation("relu")(x)
     x = layers.MaxPooling2D(2, 2, name="pool1")(x)
-    x = layers.Dropout(0.25, name="drop1")(x)
+    x = layers.SpatialDropout2D(0.15, name="sdrop1")(x)
 
-    # Blok 2  ─────────────────────────────────────────────────────────────────
-    x = layers.Conv2D(128, 3, padding="same", name="conv2a")(x)
+    # Blok 2: 24→12
+    x = layers.Conv2D(128, 3, padding="same", kernel_initializer="he_normal", name="conv2a")(x)
     x = layers.BatchNormalization(name="bn2a")(x)
     x = layers.Activation("relu")(x)
-    x = layers.Conv2D(128, 3, padding="same", name="conv2b")(x)
+    x = layers.Conv2D(128, 3, padding="same", kernel_initializer="he_normal", name="conv2b")(x)
     x = layers.BatchNormalization(name="bn2b")(x)
     x = layers.Activation("relu")(x)
     x = layers.MaxPooling2D(2, 2, name="pool2")(x)
-    x = layers.Dropout(0.25, name="drop2")(x)
+    x = layers.SpatialDropout2D(0.2, name="sdrop2")(x)
 
-    # Blok 3  ─────────────────────────────────────────────────────────────────
-    x = layers.Conv2D(256, 3, padding="same", name="conv3a")(x)
+    # Blok 3: 12→6
+    x = layers.Conv2D(256, 3, padding="same", kernel_initializer="he_normal", name="conv3a")(x)
     x = layers.BatchNormalization(name="bn3a")(x)
     x = layers.Activation("relu")(x)
-    x = layers.Conv2D(256, 3, padding="same", name="conv3b")(x)
+    x = layers.Conv2D(256, 3, padding="same", kernel_initializer="he_normal", name="conv3b")(x)
     x = layers.BatchNormalization(name="bn3b")(x)
     x = layers.Activation("relu")(x)
     x = layers.MaxPooling2D(2, 2, name="pool3")(x)
-    x = layers.Dropout(0.25, name="drop3")(x)
+    x = layers.SpatialDropout2D(0.25, name="sdrop3")(x)
 
-    # Sınıflandırıcı  ─────────────────────────────────────────────────────────
+    # Siniflandirici
     x = layers.GlobalAveragePooling2D(name="gap")(x)
-    x = layers.Dense(512, name="dense_512")(x)
+    x = layers.Dense(512, kernel_initializer="he_normal", name="dense_512")(x)
     x = layers.BatchNormalization(name="bn_head")(x)
     x = layers.Activation("relu")(x)
     x = layers.Dropout(0.5, name="drop_head")(x)
     outputs = layers.Dense(num_classes, activation="softmax", name="predictions")(x)
 
-    model = keras.Model(inp, outputs, name="trafik_cnn")
+    model = keras.Model(inp, outputs, name="trafik_cnn_v2")
 
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
@@ -86,10 +85,5 @@ def build_model(
         metrics=["accuracy"],
     )
 
-    print(f"[Model] Özel CNN oluşturuldu — {model.count_params():,} parametre (tamamı eğitilebilir)")
+    print(f"[Model] CNN v2 olusturuldu — {model.count_params():,} parametre")
     return model
-
-
-def unfreeze_top_layers(model, num_layers: int = 20) -> None:
-    """Özel CNN için kullanılmaz — tüm katmanlar zaten açık."""
-    print("[Model] Özel CNN: tüm katmanlar zaten eğitilebilir, unfreeze gerekmez.")

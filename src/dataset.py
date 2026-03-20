@@ -1,6 +1,10 @@
 """
-GTSRB veri seti yükleme ve ön işleme.
-tensorflow-datasets üzerinden otomatik indirir.
+GTSRB veri seti yükleme, augmentation ve ön işleme.
+
+Özellikler:
+  - Online augmentation (eğitim sırasında her epoch farklı dönüşümler)
+  - Sınıf dengeleme (oversampling + class weights)
+  - CLAHE ön işleme (düşük kontrast iyileştirme)
 """
 
 import os
@@ -12,141 +16,136 @@ import tensorflow as tf
 import numpy as np
 
 
-def get_augmentation_layer() -> tf.keras.Sequential:
+# ── Augmentation katmanı ──────────────────────────────────────────────────────
+
+def get_augmentation_layer():
     """
-    Trafik işaretleri için hafif augmentation.
-    - Horizontal flip YOK (yön işaretleri değişir)
-    - Hafif döndürme ve zoom (gerçek dünya koşulları)
+    Trafik isaretleri icin gercekci augmentation.
+    - Horizontal flip YOK (yon isaretleri anlami degisir)
+    - Hafif dondurme, zoom, parlaklık, kontrast
+    - Sonunda clip layer ile [0,1] araliginda tut
     """
     return tf.keras.Sequential([
-        tf.keras.layers.RandomRotation(0.1),        # ±36 derece
-        tf.keras.layers.RandomZoom(0.1),            # %±10 zoom
-        tf.keras.layers.RandomBrightness(0.15),
+        tf.keras.layers.RandomRotation(0.06),
+        tf.keras.layers.RandomZoom((-0.08, 0.08)),
+        tf.keras.layers.RandomBrightness(0.15, value_range=(0.0, 1.0)),
         tf.keras.layers.RandomContrast(0.15),
+        tf.keras.layers.RandomTranslation(0.06, 0.06),
+        # Clip to [0,1] — brightness/contrast can push values out of range
+        tf.keras.layers.Lambda(lambda x: tf.clip_by_value(x, 0.0, 1.0)),
     ], name="augmentation")
 
 
-def _preprocess(image, label, img_size, num_classes):
-    """Görüntüyü yeniden boyutlandır, normalize et ve etiketi one-hot'a çevir."""
-    image = tf.image.resize(image, img_size)
-    image = tf.cast(image, tf.float32) / 255.0
-    label = tf.one_hot(label, num_classes)
-    return image, label
+# ── CLAHE ön işleme ──────────────────────────────────────────────────────────
 
-
-def load_gtsrb_tfds(img_size=(64, 64), batch_size=64, num_classes=43, data_dir=None):
+def apply_clahe_batch(images_np):
     """
-    tensorflow-datasets üzerinden GTSRB'yi yükler.
-    İlk çağrıda (~400 MB) otomatik indirir.
-
-    Returns:
-        train_ds, val_ds, test_ds  — tf.data.Dataset nesneleri
+    Görüntü dizisine CLAHE (Contrast Limited Adaptive Histogram Equalization) uygular.
+    Düşük kontrast / gölgeli / karanlık fotoğraflarda detayları öne çıkarır.
     """
-    import tensorflow_datasets as tfds
+    try:
+        import cv2
+    except ImportError:
+        return images_np
 
-    print("[Veri] GTSRB tensorflow-datasets üzerinden yükleniyor...")
-    print("[Veri] İlk çalıştırmada ~400 MB indirilecek, lütfen bekleyin...")
-
-    kwargs = dict(
-        name="gtsrb",
-        as_supervised=True,
-        shuffle_files=True,
-    )
-    if data_dir:
-        kwargs["data_dir"] = data_dir
-
-    train_raw, test_raw = tfds.load(split=["train", "test"], **kwargs)
-
-    total = tf.data.experimental.cardinality(train_raw).numpy()
-    val_size = int(total * 0.2)
-
-    train_raw = train_raw.shuffle(10000, seed=42)
-    val_raw   = train_raw.take(val_size)
-    train_raw = train_raw.skip(val_size)
-
-    def preprocess(img, lbl):
-        return _preprocess(img, lbl, img_size, num_classes)
-
-    AUTOTUNE = tf.data.AUTOTUNE
-
-    train_ds = (
-        train_raw
-        .map(preprocess, num_parallel_calls=AUTOTUNE)
-        .cache()
-        .shuffle(5000)
-        .batch(batch_size)
-        .prefetch(AUTOTUNE)
-    )
-    val_ds = (
-        val_raw
-        .map(preprocess, num_parallel_calls=AUTOTUNE)
-        .cache()
-        .batch(batch_size)
-        .prefetch(AUTOTUNE)
-    )
-    test_ds = (
-        test_raw
-        .map(preprocess, num_parallel_calls=AUTOTUNE)
-        .cache()
-        .batch(batch_size)
-        .prefetch(AUTOTUNE)
-    )
-
-    print(f"[Veri] Eğitim: ~{total - val_size} | Doğrulama: ~{val_size} örnek")
-
-    return train_ds, val_ds, test_ds
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    result = []
+    for img in images_np:
+        img_uint8 = (img * 255).astype(np.uint8)
+        lab = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2LAB)
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        result.append(enhanced.astype(np.float32) / 255.0)
+    return np.stack(result)
 
 
-def load_test_dataset(data_dir, img_size=(64, 64), batch_size=64, num_classes=43):
+# ── Sınıf ağırlıkları hesaplama ──────────────────────────────────────────────
+
+def compute_class_weights(data_dir, num_classes=43):
+    """Her sınıftaki örnek sayısına göre ters orantılı ağırlık hesaplar."""
+    train_dir = os.path.join(data_dir, "Train")
+    counts = np.zeros(num_classes, dtype=np.float64)
+    for cls_idx in range(num_classes):
+        cls_dir = os.path.join(train_dir, str(cls_idx))
+        if os.path.isdir(cls_dir):
+            counts[cls_idx] = len(os.listdir(cls_dir))
+
+    total = counts.sum()
+    weights = {}
+    for i in range(num_classes):
+        if counts[i] > 0:
+            weights[i] = total / (num_classes * counts[i])
+        else:
+            weights[i] = 1.0
+    return weights
+
+
+# ── Oversampling ──────────────────────────────────────────────────────────────
+
+def _oversample_directory(data_dir, img_size, target_per_class=1200):
     """
-    data/Test/ klasöründen test verisini yükler (Test.csv etiketleri ile).
-    Test.csv yoksa None döner.
+    Az örnekli sınıfları offline olarak augmente ederek hedef sayıya çıkarır.
+    Sonuçlar numpy array olarak döner (augmented eğitim seti).
     """
-    import pandas as pd
     from PIL import Image as PILImage
 
-    csv_path = os.path.join(data_dir, "Test.csv")
-    test_dir = os.path.join(data_dir, "Test")
+    train_dir = os.path.join(data_dir, "Train")
+    all_images = []
+    all_labels = []
 
-    if not os.path.isfile(csv_path) or not os.path.isdir(test_dir):
-        print("[Veri] Test.csv veya Test/ bulunamadı, test seti atlanıyor.")
-        return None
+    aug_layer = get_augmentation_layer()
 
-    df = pd.read_csv(csv_path)
-    # Sütun adlarını esnek tut
-    path_col  = "Path"   if "Path"    in df.columns else df.columns[0]
-    label_col = "ClassId" if "ClassId" in df.columns else df.columns[-1]
-
-    images = []
-    labels = []
-    for _, row in df.iterrows():
-        img_path = os.path.join(data_dir, str(row[path_col]))
-        if not os.path.isfile(img_path):
+    for cls_idx in range(43):
+        cls_dir = os.path.join(train_dir, str(cls_idx))
+        if not os.path.isdir(cls_dir):
             continue
-        img = PILImage.open(img_path).convert("RGB").resize((img_size[1], img_size[0]))
-        images.append(np.array(img, dtype=np.float32) / 255.0)
-        labels.append(int(row[label_col]))
 
-    if not images:
-        return None
+        cls_images = []
+        files = [f for f in os.listdir(cls_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.ppm'))]
+        for fname in files:
+            img = PILImage.open(os.path.join(cls_dir, fname)).convert("RGB").resize((img_size[1], img_size[0]))
+            cls_images.append(np.array(img, dtype=np.float32) / 255.0)
 
-    images = np.stack(images, axis=0)
-    labels = np.array(labels, dtype=np.int32)
+        if not cls_images:
+            continue
 
-    dataset = tf.data.Dataset.from_tensor_slices((
-        images,
-        tf.one_hot(labels, num_classes)
-    ))
-    AUTOTUNE = tf.data.AUTOTUNE
-    dataset = dataset.batch(batch_size).prefetch(AUTOTUNE)
-    print(f"[Veri] Test seti yüklendi: {len(images)} örnek")
-    return dataset
+        cls_arr = np.stack(cls_images)
+        n_original = len(cls_arr)
+
+        # Augmentation ile hedef sayıya çıkar
+        if n_original < target_per_class:
+            n_needed = target_per_class - n_original
+            aug_images = []
+            for _ in range(n_needed):
+                idx = np.random.randint(0, n_original)
+                src = cls_arr[idx:idx+1]
+                augmented = aug_layer(src, training=True).numpy()
+                augmented = np.clip(augmented, 0.0, 1.0)
+                aug_images.append(augmented[0])
+            if aug_images:
+                cls_arr = np.concatenate([cls_arr, np.stack(aug_images)], axis=0)
+
+        all_images.append(cls_arr)
+        all_labels.extend([cls_idx] * len(cls_arr))
+
+        if cls_idx % 10 == 0:
+            print(f"  [Oversampling] Sınıf {cls_idx}: {n_original} → {len(cls_arr)} örnek")
+
+    images = np.concatenate(all_images, axis=0)
+    labels = np.array(all_labels, dtype=np.int32)
+    print(f"[Veri] Oversampling sonrası toplam: {len(labels):,} örnek")
+    return images, labels
 
 
-def load_gtsrb_from_directory(data_dir, img_size=(64, 64), batch_size=64):
+# ── Ana veri yükleme fonksiyonları ────────────────────────────────────────────
+
+def load_gtsrb_from_directory(data_dir, img_size=(48, 48), batch_size=64, augment=False):
     """
     data/Train/ klasöründen veri yükler (Kaggle formatı).
     80/20 train/val bölünmesi yapar.
+
+    Args:
+        augment: True ise online augmentation uygular.
     """
     train_dir = os.path.join(data_dir, "Train")
     if not os.path.isdir(train_dir):
@@ -156,8 +155,6 @@ def load_gtsrb_from_directory(data_dir, img_size=(64, 64), batch_size=64):
         )
 
     AUTOTUNE = tf.data.AUTOTUNE
-    # Sınıf isimlerini sayısal sırada ver (0,1,2,...,42)
-    # image_dataset_from_directory alfabetik sıralar (0,1,10,...), bu yanlış!
     class_names = [str(i) for i in range(43)]
 
     train_ds = tf.keras.utils.image_dataset_from_directory(
@@ -182,9 +179,106 @@ def load_gtsrb_from_directory(data_dir, img_size=(64, 64), batch_size=64):
     )
 
     normalization = tf.keras.layers.Rescaling(1.0 / 255)
-    # NOT: train_ds'e .cache() EKLEME — augmentation her epoch'ta farklı
-    # uygulanabilsin diye. Val seti değişmeyeceği için cache'lenebilir.
-    train_ds = train_ds.map(lambda x, y: (normalization(x), y), num_parallel_calls=AUTOTUNE).prefetch(AUTOTUNE)
-    val_ds   = val_ds.map(lambda x, y: (normalization(x), y), num_parallel_calls=AUTOTUNE).cache().prefetch(AUTOTUNE)
+
+    if augment:
+        aug_layer = get_augmentation_layer()
+        def train_preprocess(x, y):
+            x = normalization(x)
+            x = aug_layer(x, training=True)
+            return x, y
+        train_ds = train_ds.map(train_preprocess, num_parallel_calls=AUTOTUNE).prefetch(AUTOTUNE)
+    else:
+        train_ds = train_ds.map(lambda x, y: (normalization(x), y), num_parallel_calls=AUTOTUNE).prefetch(AUTOTUNE)
+
+    val_ds = val_ds.map(lambda x, y: (normalization(x), y), num_parallel_calls=AUTOTUNE).cache().prefetch(AUTOTUNE)
 
     return train_ds, val_ds
+
+
+def load_balanced_dataset(data_dir, img_size=(48, 48), batch_size=64, target_per_class=1200):
+    """
+    Oversampled + balanced veri seti yükler.
+    Az örnekli sınıfları augmentation ile çoğaltır, CLAHE uygular.
+    80/20 train/val split yapar.
+
+    Returns:
+        train_ds, val_ds — tf.data.Dataset
+    """
+    print("[Veri] Dengelenmiş veri seti hazırlanıyor...")
+    images, labels = _oversample_directory(data_dir, img_size, target_per_class)
+
+    # CLAHE uygula
+    print("[Veri] CLAHE kontrast iyileştirme uygulanıyor...")
+    images = apply_clahe_batch(images)
+
+    # Shuffle & split
+    n = len(labels)
+    indices = np.random.RandomState(42).permutation(n)
+    images = images[indices]
+    labels = labels[indices]
+
+    split = int(n * 0.8)
+    x_train, x_val = images[:split], images[split:]
+    y_train, y_val = labels[:split], labels[split:]
+
+    print(f"[Veri] Eğitim: {len(y_train):,} | Doğrulama: {len(y_val):,}")
+
+    AUTOTUNE = tf.data.AUTOTUNE
+    num_classes = 43
+
+    train_ds = tf.data.Dataset.from_tensor_slices((
+        x_train, tf.one_hot(y_train, num_classes)
+    )).shuffle(10000).batch(batch_size).prefetch(AUTOTUNE)
+
+    val_ds = tf.data.Dataset.from_tensor_slices((
+        x_val, tf.one_hot(y_val, num_classes)
+    )).batch(batch_size).cache().prefetch(AUTOTUNE)
+
+    return train_ds, val_ds
+
+
+def load_test_dataset(data_dir, img_size=(64, 64), batch_size=64, num_classes=43):
+    """
+    data/Test/ klasöründen test verisini yükler (Test.csv etiketleri ile).
+    Test.csv yoksa None döner. Opsiyonel CLAHE uygular.
+    """
+    import pandas as pd
+    from PIL import Image as PILImage
+
+    csv_path = os.path.join(data_dir, "Test.csv")
+    test_dir = os.path.join(data_dir, "Test")
+
+    if not os.path.isfile(csv_path) or not os.path.isdir(test_dir):
+        print("[Veri] Test.csv veya Test/ bulunamadı, test seti atlanıyor.")
+        return None
+
+    df = pd.read_csv(csv_path)
+    path_col  = "Path"    if "Path"    in df.columns else df.columns[0]
+    label_col = "ClassId" if "ClassId" in df.columns else df.columns[-1]
+
+    images = []
+    labels = []
+    for _, row in df.iterrows():
+        img_path = os.path.join(data_dir, str(row[path_col]))
+        if not os.path.isfile(img_path):
+            continue
+        img = PILImage.open(img_path).convert("RGB").resize((img_size[1], img_size[0]))
+        images.append(np.array(img, dtype=np.float32) / 255.0)
+        labels.append(int(row[label_col]))
+
+    if not images:
+        return None
+
+    images = np.stack(images, axis=0)
+    labels = np.array(labels, dtype=np.int32)
+
+    # CLAHE
+    images = apply_clahe_batch(images)
+
+    dataset = tf.data.Dataset.from_tensor_slices((
+        images, tf.one_hot(labels, num_classes)
+    ))
+    AUTOTUNE = tf.data.AUTOTUNE
+    dataset = dataset.batch(batch_size).prefetch(AUTOTUNE)
+    print(f"[Veri] Test seti yüklendi: {len(images)} örnek (CLAHE uygulandı)")
+    return dataset

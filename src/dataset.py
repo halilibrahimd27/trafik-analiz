@@ -1,10 +1,11 @@
 """
-GTSRB veri seti yükleme, augmentation ve ön işleme.
+GTSRB veri seti yukleme, augmentation ve on isleme.
 
-Özellikler:
-  - Online augmentation (eğitim sırasında her epoch farklı dönüşümler)
-  - Sınıf dengeleme (oversampling + class weights)
-  - CLAHE ön işleme (düşük kontrast iyileştirme)
+Ozellikler:
+  - Online augmentation (her epoch farkli donusumler)
+  - Sinif dengeleme (oversampling + class weights)
+  - CLAHE on isleme (dusuk kontrast iyilestirme)
+  - Test-Time Augmentation (TTA) destegi
 """
 
 import os
@@ -16,32 +17,82 @@ import tensorflow as tf
 import numpy as np
 
 
-# ── Augmentation katmanı ──────────────────────────────────────────────────────
+# -- Augmentation katmani -----------------------------------------------------
 
 def get_augmentation_layer():
     """
     Trafik isaretleri icin gercekci augmentation.
     - Horizontal flip YOK (yon isaretleri anlami degisir)
-    - Hafif dondurme, zoom, parlaklık, kontrast
-    - Sonunda clip layer ile [0,1] araliginda tut
+    - Hafif donme, zoom, parlaklik, kontrast, oteleme
+    - Sonunda [0,1] araliginda kirpilir
     """
     return tf.keras.Sequential([
-        tf.keras.layers.RandomRotation(0.06),
-        tf.keras.layers.RandomZoom((-0.08, 0.08)),
-        tf.keras.layers.RandomBrightness(0.15, value_range=(0.0, 1.0)),
-        tf.keras.layers.RandomContrast(0.15),
-        tf.keras.layers.RandomTranslation(0.06, 0.06),
-        # Clip to [0,1] — brightness/contrast can push values out of range
+        tf.keras.layers.RandomRotation(0.08),
+        tf.keras.layers.RandomZoom((-0.10, 0.10)),
+        tf.keras.layers.RandomBrightness(0.18, value_range=(0.0, 1.0)),
+        tf.keras.layers.RandomContrast(0.18),
+        tf.keras.layers.RandomTranslation(0.08, 0.08),
         tf.keras.layers.Lambda(lambda x: tf.clip_by_value(x, 0.0, 1.0)),
     ], name="augmentation")
 
 
-# ── CLAHE ön işleme ──────────────────────────────────────────────────────────
+def get_tta_augmentations():
+    """
+    Test-Time Augmentation icin hafif donusum listesi.
+    Her bir fonksiyon (H, W, 3) tensor -> (H, W, 3) tensor alir.
+
+    TTA: ayni goruntuyu bir kac varyantla tahmin edip olasiliklari ortalayarak
+    daha kararli bir sonuc elde etme teknigi.
+    """
+    def identity(img):      return img
+    def rot_p5(img):        return tf.image.rot90(img, k=0)  # placeholder
+    def zoom_out(img):
+        # Hafif pad + merkeze kirp (zoom-out etkisi)
+        h = tf.shape(img)[0]
+        w = tf.shape(img)[1]
+        pad = 4
+        padded = tf.image.resize_with_crop_or_pad(img, h + 2 * pad, w + 2 * pad)
+        return tf.image.resize(padded, (h, w))
+    def zoom_in(img):
+        h = tf.shape(img)[0]
+        w = tf.shape(img)[1]
+        crop = 4
+        cropped = tf.image.resize_with_crop_or_pad(img, h - 2 * crop, w - 2 * crop)
+        return tf.image.resize(cropped, (h, w))
+    def bright_up(img):     return tf.clip_by_value(img * 1.10, 0.0, 1.0)
+    def bright_dn(img):     return tf.clip_by_value(img * 0.90, 0.0, 1.0)
+
+    return [identity, zoom_in, zoom_out, bright_up, bright_dn]
+
+
+def tta_predict(model, image_np, n_augments: int = 5):
+    """Tek bir goruntu uzerinde TTA uygular, olasiliklari ortalar.
+
+    Args:
+        model:       Keras modeli.
+        image_np:    (H, W, 3) float32 [0,1] numpy dizisi.
+        n_augments:  Kullanilacak TTA varyant sayisi (en fazla 5).
+
+    Returns:
+        (num_classes,) ortalama olasilik vektoru.
+    """
+    tfs = get_tta_augmentations()[:n_augments]
+    variants = []
+    img = tf.convert_to_tensor(image_np, dtype=tf.float32)
+    for fn in tfs:
+        aug = fn(img).numpy()
+        variants.append(aug)
+    batch = np.stack(variants, axis=0)
+    probs = model.predict(batch, verbose=0)
+    return probs.mean(axis=0)
+
+
+# -- CLAHE on isleme ----------------------------------------------------------
 
 def apply_clahe_batch(images_np):
     """
-    Görüntü dizisine CLAHE (Contrast Limited Adaptive Histogram Equalization) uygular.
-    Düşük kontrast / gölgeli / karanlık fotoğraflarda detayları öne çıkarır.
+    Goruntu dizisine CLAHE (Contrast Limited Adaptive Histogram Equalization) uygular.
+    Dusuk kontrastli / karanlik fotograflarda detaylari one cikarir.
     """
     try:
         import cv2
@@ -59,10 +110,10 @@ def apply_clahe_batch(images_np):
     return np.stack(result)
 
 
-# ── Sınıf ağırlıkları hesaplama ──────────────────────────────────────────────
+# -- Sinif agirliklari hesaplama ---------------------------------------------
 
 def compute_class_weights(data_dir, num_classes=43):
-    """Her sınıftaki örnek sayısına göre ters orantılı ağırlık hesaplar."""
+    """Her siniftaki ornek sayisina gore ters orantili agirlik hesaplar."""
     train_dir = os.path.join(data_dir, "Train")
     counts = np.zeros(num_classes, dtype=np.float64)
     for cls_idx in range(num_classes):
@@ -80,12 +131,26 @@ def compute_class_weights(data_dir, num_classes=43):
     return weights
 
 
-# ── Oversampling ──────────────────────────────────────────────────────────────
+def get_class_counts(data_dir, num_classes=43):
+    """data/Train/<id>/ altindaki dosya sayilarini dondur."""
+    train_dir = os.path.join(data_dir, "Train")
+    counts = np.zeros(num_classes, dtype=np.int64)
+    for cls_idx in range(num_classes):
+        cls_dir = os.path.join(train_dir, str(cls_idx))
+        if os.path.isdir(cls_dir):
+            counts[cls_idx] = len([
+                f for f in os.listdir(cls_dir)
+                if f.lower().endswith(('.png', '.jpg', '.jpeg', '.ppm'))
+            ])
+    return counts
+
+
+# -- Oversampling -------------------------------------------------------------
 
 def _oversample_directory(data_dir, img_size, target_per_class=1200):
     """
-    Az örnekli sınıfları offline olarak augmente ederek hedef sayıya çıkarır.
-    Sonuçlar numpy array olarak döner (augmented eğitim seti).
+    Az ornekli siniflari offline augmente ederek hedef sayiya cikarir.
+    Tum siniflari numpy array olarak dondurur.
     """
     from PIL import Image as PILImage
 
@@ -112,7 +177,6 @@ def _oversample_directory(data_dir, img_size, target_per_class=1200):
         cls_arr = np.stack(cls_images)
         n_original = len(cls_arr)
 
-        # Augmentation ile hedef sayıya çıkar
         if n_original < target_per_class:
             n_needed = target_per_class - n_original
             aug_images = []
@@ -129,29 +193,26 @@ def _oversample_directory(data_dir, img_size, target_per_class=1200):
         all_labels.extend([cls_idx] * len(cls_arr))
 
         if cls_idx % 10 == 0:
-            print(f"  [Oversampling] Sınıf {cls_idx}: {n_original} → {len(cls_arr)} örnek")
+            print(f"  [Oversampling] Sinif {cls_idx}: {n_original} -> {len(cls_arr)} ornek")
 
     images = np.concatenate(all_images, axis=0)
     labels = np.array(all_labels, dtype=np.int32)
-    print(f"[Veri] Oversampling sonrası toplam: {len(labels):,} örnek")
+    print(f"[Veri] Oversampling sonrasi toplam: {len(labels):,} ornek")
     return images, labels
 
 
-# ── Ana veri yükleme fonksiyonları ────────────────────────────────────────────
+# -- Ana veri yukleme fonksiyonlari ------------------------------------------
 
-def load_gtsrb_from_directory(data_dir, img_size=(48, 48), batch_size=64, augment=False):
+def load_gtsrb_from_directory(data_dir, img_size=(64, 64), batch_size=64, augment=False):
     """
-    data/Train/ klasöründen veri yükler (Kaggle formatı).
-    80/20 train/val bölünmesi yapar.
-
-    Args:
-        augment: True ise online augmentation uygular.
+    data/Train/ klasorunden veri yukler.
+    80/20 train/val bolunmesi yapar.
     """
     train_dir = os.path.join(data_dir, "Train")
     if not os.path.isdir(train_dir):
         raise FileNotFoundError(
-            f"{train_dir} bulunamadı. "
-            "Kaggle'dan GTSRB indirip data/ altına çıkartın."
+            f"{train_dir} bulunamadi. "
+            "Kaggle'dan GTSRB indirip data/ altina cikartin."
         )
 
     AUTOTUNE = tf.data.AUTOTUNE
@@ -195,21 +256,19 @@ def load_gtsrb_from_directory(data_dir, img_size=(48, 48), batch_size=64, augmen
     return train_ds, val_ds
 
 
-def load_balanced_dataset(data_dir, img_size=(48, 48), batch_size=64, target_per_class=1200):
+def load_balanced_dataset(data_dir, img_size=(64, 64), batch_size=64, target_per_class=1200,
+                           apply_clahe=True, online_augment=True):
     """
-    Oversampled + balanced veri seti yükler.
-    Az örnekli sınıfları augmentation ile çoğaltır, CLAHE uygular.
+    Oversampled + balanced veri seti yukler.
+    Az ornekli siniflari augmentation ile cogaltir, opsiyonel CLAHE uygular.
     80/20 train/val split yapar.
-
-    Returns:
-        train_ds, val_ds — tf.data.Dataset
     """
-    print("[Veri] Dengelenmiş veri seti hazırlanıyor...")
+    print("[Veri] Dengelenmis veri seti hazirlaniyor...")
     images, labels = _oversample_directory(data_dir, img_size, target_per_class)
 
-    # CLAHE uygula
-    print("[Veri] CLAHE kontrast iyileştirme uygulanıyor...")
-    images = apply_clahe_batch(images)
+    if apply_clahe:
+        print("[Veri] CLAHE kontrast iyilestirme uygulaniyor...")
+        images = apply_clahe_batch(images)
 
     # Shuffle & split
     n = len(labels)
@@ -221,14 +280,24 @@ def load_balanced_dataset(data_dir, img_size=(48, 48), batch_size=64, target_per
     x_train, x_val = images[:split], images[split:]
     y_train, y_val = labels[:split], labels[split:]
 
-    print(f"[Veri] Eğitim: {len(y_train):,} | Doğrulama: {len(y_val):,}")
+    print(f"[Veri] Egitim: {len(y_train):,} | Dogrulama: {len(y_val):,}")
 
     AUTOTUNE = tf.data.AUTOTUNE
     num_classes = 43
 
     train_ds = tf.data.Dataset.from_tensor_slices((
         x_train, tf.one_hot(y_train, num_classes)
-    )).shuffle(10000).batch(batch_size).prefetch(AUTOTUNE)
+    )).shuffle(10000)
+
+    if online_augment:
+        aug_layer = get_augmentation_layer()
+        def aug_fn(x, y):
+            # Tek ornek -> ekle batch boyutu -> augmente -> kaldir
+            x = aug_layer(tf.expand_dims(x, 0), training=True)[0]
+            return x, y
+        train_ds = train_ds.map(aug_fn, num_parallel_calls=AUTOTUNE)
+
+    train_ds = train_ds.batch(batch_size).prefetch(AUTOTUNE)
 
     val_ds = tf.data.Dataset.from_tensor_slices((
         x_val, tf.one_hot(y_val, num_classes)
@@ -237,10 +306,10 @@ def load_balanced_dataset(data_dir, img_size=(48, 48), batch_size=64, target_per
     return train_ds, val_ds
 
 
-def load_test_dataset(data_dir, img_size=(64, 64), batch_size=64, num_classes=43):
+def load_test_dataset(data_dir, img_size=(64, 64), batch_size=64, num_classes=43,
+                       apply_clahe=True):
     """
-    data/Test/ klasöründen test verisini yükler (Test.csv etiketleri ile).
-    Test.csv yoksa None döner. Opsiyonel CLAHE uygular.
+    data/Test/ klasorunden test verisini yukler (Test.csv etiketleri ile).
     """
     import pandas as pd
     from PIL import Image as PILImage
@@ -249,7 +318,7 @@ def load_test_dataset(data_dir, img_size=(64, 64), batch_size=64, num_classes=43
     test_dir = os.path.join(data_dir, "Test")
 
     if not os.path.isfile(csv_path) or not os.path.isdir(test_dir):
-        print("[Veri] Test.csv veya Test/ bulunamadı, test seti atlanıyor.")
+        print("[Veri] Test.csv veya Test/ bulunamadi, test seti atlaniyor.")
         return None
 
     df = pd.read_csv(csv_path)
@@ -272,13 +341,47 @@ def load_test_dataset(data_dir, img_size=(64, 64), batch_size=64, num_classes=43
     images = np.stack(images, axis=0)
     labels = np.array(labels, dtype=np.int32)
 
-    # CLAHE
-    images = apply_clahe_batch(images)
+    if apply_clahe:
+        images = apply_clahe_batch(images)
 
     dataset = tf.data.Dataset.from_tensor_slices((
         images, tf.one_hot(labels, num_classes)
     ))
     AUTOTUNE = tf.data.AUTOTUNE
     dataset = dataset.batch(batch_size).prefetch(AUTOTUNE)
-    print(f"[Veri] Test seti yüklendi: {len(images)} örnek (CLAHE uygulandı)")
+    print(f"[Veri] Test seti yuklendi: {len(images)} ornek{' (CLAHE)' if apply_clahe else ''}")
     return dataset
+
+
+def load_test_arrays(data_dir, img_size=(64, 64), apply_clahe=True):
+    """Test verisini numpy array olarak dondur (evaluate / TTA icin)."""
+    import pandas as pd
+    from PIL import Image as PILImage
+
+    csv_path = os.path.join(data_dir, "Test.csv")
+    test_dir = os.path.join(data_dir, "Test")
+    if not os.path.isfile(csv_path) or not os.path.isdir(test_dir):
+        return None
+
+    df = pd.read_csv(csv_path)
+    path_col  = "Path"    if "Path"    in df.columns else df.columns[0]
+    label_col = "ClassId" if "ClassId" in df.columns else df.columns[-1]
+
+    images, labels = [], []
+    for _, row in df.iterrows():
+        img_path = os.path.join(data_dir, str(row[path_col]))
+        if not os.path.isfile(img_path):
+            continue
+        img = PILImage.open(img_path).convert("RGB").resize((img_size[1], img_size[0]))
+        images.append(np.array(img, dtype=np.float32) / 255.0)
+        labels.append(int(row[label_col]))
+
+    if not images:
+        return None
+    images = np.stack(images, axis=0)
+    labels = np.array(labels, dtype=np.int32)
+
+    if apply_clahe:
+        images = apply_clahe_batch(images)
+
+    return images, labels

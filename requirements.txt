@@ -1,11 +1,22 @@
+# Derin Öğrenme
 tensorflow-macos>=2.12.0
 tensorflow-metal>=1.0.0
-tensorflow-datasets>=4.9.0
+
+# Veri işleme
 numpy>=1.23.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
-scikit-learn>=1.2.0
+pandas>=2.0.0
 Pillow>=9.5.0
 opencv-python>=4.7.0
+
+# Görselleştirme
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Metrikler
+scikit-learn>=1.2.0
+
+# Web arayüzü
+streamlit>=1.30.0
+
+# Yardımcılar
 tqdm>=4.65.0
-pandas>=2.0.0

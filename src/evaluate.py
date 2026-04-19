@@ -62,30 +62,11 @@ def evaluate(model_path: str) -> None:
         classification_report,
         confusion_matrix,
     )
-    from src.dataset import load_test_dataset as _load_test_ds
-    import pandas as pd
-    from PIL import Image as _PILImage
+    from src.dataset import load_test_arrays
 
     def load_test_data(data_dir, img_size):
-        """Test.csv ve Test/ klasöründen veriyi numpy array olarak döndürür."""
-        csv_path = os.path.join(data_dir, "Test.csv")
-        test_dir = os.path.join(data_dir, "Test")
-        if not os.path.isfile(csv_path) or not os.path.isdir(test_dir):
-            return None
-        df = pd.read_csv(csv_path)
-        path_col  = "Path"    if "Path"    in df.columns else df.columns[0]
-        label_col = "ClassId" if "ClassId" in df.columns else df.columns[-1]
-        images, labels = [], []
-        for _, row in df.iterrows():
-            img_path = os.path.join(data_dir, str(row[path_col]))
-            if not os.path.isfile(img_path):
-                continue
-            img = _PILImage.open(img_path).convert("RGB").resize((img_size[1], img_size[0]))
-            images.append(np.array(img, dtype=np.float32) / 255.0)
-            labels.append(int(row[label_col]))
-        if not images:
-            return None
-        return np.stack(images), np.array(labels, dtype=np.int32)
+        """Test setini CLAHE ile on islenmis numpy array olarak dondurur."""
+        return load_test_arrays(data_dir, img_size=img_size, apply_clahe=True)
     from src.visualize import (
         plot_confusion_matrix,
         plot_sample_predictions,

@@ -14,16 +14,20 @@ for d in [DATA_DIR, MODEL_DIR, RESULT_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # ── Model parametreleri ─────────────────────────────────────────────────────
-IMG_SIZE   = (48, 48)      # Giriş görüntü boyutu
+IMG_SIZE   = (64, 64)      # Giriş görüntü boyutu (v3: 48 → 64, daha fazla detay)
 BATCH_SIZE = 64
-EPOCHS     = 30
+EPOCHS     = 45
 NUM_CLASSES = 43           # GTSRB sınıf sayısı
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
+LABEL_SMOOTHING = 0.1
+WEIGHT_DECAY = 1e-4
 
 # ── Dosya adları ────────────────────────────────────────────────────────────
-MODEL_PATH  = os.path.join(MODEL_DIR, "trafik_model.keras")
-HISTORY_PATH = os.path.join(RESULT_DIR, "training_history.png")
-CONF_MATRIX_PATH = os.path.join(RESULT_DIR, "confusion_matrix.png")
+MODEL_PATH        = os.path.join(MODEL_DIR, "trafik_model.keras")
+HISTORY_PATH      = os.path.join(RESULT_DIR, "training_history.png")
+HISTORY_JSON_PATH = os.path.join(RESULT_DIR, "training_history.json")
+CONF_MATRIX_PATH  = os.path.join(RESULT_DIR, "confusion_matrix.png")
+CLASS_DIST_PATH   = os.path.join(RESULT_DIR, "class_distribution.png")
 
 # ── GTSRB sınıf adları (Türkçe) ─────────────────────────────────────────────
 CLASS_NAMES = {

@@ -13,19 +13,21 @@
 
 ## 📑 İçindekiler
 
-1. [Özet](#-özet)
-2. [Motivasyon](#-motivasyon-ve-problem-tanımı)
-3. [Veri Seti](#-veri-seti-gtsrb)
-4. [Yöntem](#-yöntem)
-5. [Deneyler ve Sonuçlar](#-deneyler-ve-sonuçlar)
-6. [Web Arayüzü](#-web-arayüzü)
-7. [Kurulum](#-kurulum)
-8. [Proje Yapısı](#-proje-yapısı)
-9. [Referanslar](#-referanslar)
+1. [Özet](#-1-özet)
+2. [Motivasyon ve Problem Tanımı](#-2-motivasyon-ve-problem-tanımı)
+3. [Veri Seti (GTSRB)](#-3-veri-seti-gtsrb)
+4. [Yöntem](#-4-yöntem)
+5. [Deneyler ve Sonuçlar](#-5-deneyler-ve-sonuçlar)
+6. [Sonuç Görselleri](#-6-sonuç-görselleri)
+7. [Web Arayüzü](#-7-web-arayüzü)
+8. [Kurulum ve Kullanım](#️-8-kurulum-ve-kullanım)
+9. [Proje Yapısı](#-9-proje-yapısı)
+10. [Ders Sunumu Navigasyonu](#-10-ders-sunumu-navigasyonu)
+11. [Referanslar](#-11-referanslar)
 
 ---
 
-## 🎯 Özet
+## 🎯 1. Özet
 
 Bu projede, German Traffic Sign Recognition Benchmark (GTSRB) veri seti üzerinde **43 sınıflı trafik işareti sınıflandırma problemi** ele alınmıştır. VGG-stili, 4 konvolüsyon bloklu, sıfırdan eğitilen özel bir CNN mimarisi (**4.98M parametre**) tasarlanmış; **CLAHE önişlemesi**, **oversampling ile sınıf dengeleme**, **label smoothing**, **cosine annealing öğrenme oranı** ve **AdamW** gibi modern derin öğrenme teknikleri ile desteklenmiştir. 12,630 örneklik GTSRB test seti üzerinde **%99.19 doğruluk** ve **%99.71 top-3 doğruluk** elde edilmiştir. **Grad-CAM** ile modelin yorumlanabilirliği analiz edilmiş, **TTA** (Test-Time Augmentation) ile çıkarım aşamasında ek güvence sağlanmış, **güven eşiği + entropi** tabanlı basit bir OOD (out-of-distribution) tespit mekanizması eklenmiştir.
 
@@ -43,7 +45,7 @@ Bu projede, German Traffic Sign Recognition Benchmark (GTSRB) veri seti üzerind
 | Eğitim süresi | 108.9 dk (30 epoch, Apple M4 Metal) |
 | Eğitim boyutu (oversampled) | 53,160 örnek |
 
-## 🌟 Motivasyon ve Problem Tanımı
+## 🌟 2. Motivasyon ve Problem Tanımı
 
 Trafik işareti tanıma, **otonom sürüş** ve **sürücü destek sistemlerinin** temel bileşenlerinden biridir. Aynı levhanın farklı aydınlatma, açı, bulanıklık ve kısmi örtülme altında güvenilir biçimde tanınması gerekir. Veri setindeki sınıflar görsel olarak benzer şekillere (üçgen uyarı, daire yasak, dikdörtgen yön) sahip olduğundan; **sınıflar arası ince farkları ayıran güçlü öznitelik çıkarımına** ihtiyaç vardır.
 
@@ -57,7 +59,7 @@ Burada `y^LS` label smoothing ile yumuşatılmış hedef dağılımdır.
 
 ---
 
-## 📊 Veri Seti (GTSRB)
+## 📊 3. Veri Seti (GTSRB)
 
 **German Traffic Sign Recognition Benchmark** — Stallkamp et al. (2012).
 
@@ -74,11 +76,14 @@ Burada `y^LS` label smoothing ile yumuşatılmış hedef dağılımdır.
 
 **Zorluk:** Ciddi **sınıf dengesizliği** — en büyük sınıf 2,010 örnek, en küçük sınıf 210 örnek. Dengesizlik oranı ≈ **9.6×**. Bu, model eğitiminde azınlık sınıfların ihmal edilmesine yol açabilir.
 
-> `results/class_distribution.png` — her sınıftaki örnek sayısını gösterir (eğitim başında otomatik üretilir).
+<p align="center">
+  <img src="results/class_distribution.png" width="75%" alt="GTSRB class distribution">
+  <br><sub>Sınıf dağılımı — en bol sınıf ~2,000 örnek, en az sınıf ~200. Dengesizlik oversampling gerektirir.</sub>
+</p>
 
 ---
 
-## 🧪 Yöntem
+## 🧪 4. Yöntem
 
 Sistemin uçtan uca işleyişi aşağıdaki boru hattıyla özetlenebilir:
 
@@ -88,7 +93,7 @@ Ham görüntü → CLAHE → Normalizasyon → Augmentation → 4 Bloklu CNN v3 
                                                                           Grad-CAM
 ```
 
-### 5.1 Önişleme — CLAHE
+### 4.1 Önişleme — CLAHE
 
 **Contrast Limited Adaptive Histogram Equalization**, LAB renk uzayında L (aydınlık) kanalına uygulanır:
 
@@ -101,7 +106,7 @@ enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
 - **Neden?** Düşük kontrastlı, gölgeli veya gece fotoğraflarında sembol detayları kaybolur. CLAHE, **yerel histogramları** (4×4 bölge) klipli bir şekilde eşitleyerek detayları öne çıkarır.
 - **Avantaj:** Renk dengesini bozmaz (sadece L kanalına uygulanır), küresel histogram eşitlemenin tersine yerel adaptiftir.
 
-### 5.2 Sınıf Dengeleme
+### 4.2 Sınıf Dengeleme
 
 Dengesizlik sorununa karşı iki mekanizma:
 
@@ -114,7 +119,7 @@ Dengesizlik sorununa karşı iki mekanizma:
 
 Varsayılan modda oversampling açık, class weights kapalıdır (oversampling sonrası veri zaten dengeli).
 
-### 5.3 Augmentation (Online)
+### 4.3 Augmentation (Online)
 
 Her epoch'ta farklı rastgele dönüşümler:
 
@@ -128,7 +133,7 @@ Her epoch'ta farklı rastgele dönüşümler:
 
 > **Horizontal flip YOK.** "Sağa dönünüz" ↔ "Sola dönünüz" anlamsal olarak farklı olduğundan flip işareti bozar.
 
-### 5.4 Model Mimarisi — CNN v3
+### 4.4 Model Mimarisi — CNN v3
 
 ```
 Giriş (64×64×3)
@@ -155,7 +160,7 @@ Dense(43, Softmax)
 - **Global Average Pooling** — fully connected yerine kullanılarak parametre sayısı düşürülür ve overfit azaltılır (Lin et al., 2014).
 - **Batch Normalization** — iç kovaryans kaymasını azaltarak daha büyük öğrenme oranlarına izin verir.
 
-### 5.5 Eğitim Stratejisi
+### 4.5 Eğitim Stratejisi
 
 **Optimizer:** AdamW (Loshchilov & Hutter, 2019)
 - Adam'ın aksine weight decay'i gradyandan ayırır, L2 regularizasyonunu daha doğru uygular.
@@ -177,7 +182,7 @@ Warmup, BatchNorm istatistiklerinin stabilize olmasına izin verir; cosine annea
 
 **Checkpointing:** En iyi `val_accuracy` skoruna sahip model otomatik kaydedilir.
 
-### 5.6 Test-Time Augmentation (TTA)
+### 4.6 Test-Time Augmentation (TTA)
 
 Çıkarım sırasında tek bir tahmin yerine, aynı görüntünün 5 varyantı (orijinal, zoom-in, zoom-out, parlak, karanlık) üretilip olasılıklar ortalanır:
 
@@ -185,7 +190,7 @@ $$p_\text{TTA}(c|x) = \frac{1}{N}\sum_{i=1}^{N} p(c|T_i(x))$$
 
 Daha kararlı ve genellikle daha yüksek doğruluk sağlar, maliyeti 5× inference.
 
-### 5.7 Yorumlanabilirlik — Grad-CAM
+### 4.7 Yorumlanabilirlik — Grad-CAM
 
 **Gradient-weighted Class Activation Mapping** (Selvaraju et al., 2017), son konvolüsyon katmanının aktivasyonlarını sınıf skorunun gradyanlarıyla ağırlıklandırır:
 
@@ -193,7 +198,7 @@ $$\alpha_k^c = \frac{1}{Z}\sum_{i,j} \frac{\partial y^c}{\partial A_{ij}^k} \qqu
 
 Sonuç: modelin **nereye baktığını** gösteren sıcaklık haritası. Projenin web arayüzünde **Grad-CAM Analizi** sekmesinde canlı olarak izlenebilir.
 
-### 5.8 Out-of-Distribution (OOD) / Bilinmeyen Levha Tespiti
+### 4.8 Out-of-Distribution (OOD) / Bilinmeyen Levha Tespiti
 
 43-sınıflı bir sınıflandırıcı, eğitim setinde olmayan bir levhayla karşılaştığında **zorunlu olarak en benzer tanıdık sınıfı** atar — bu da yanıltıcı "yüksek güven" üretir. Bu riski azaltmak için arayüze basit bir çoklu-sinyal OOD tespiti eklendi:
 
@@ -205,7 +210,7 @@ Sonuç: modelin **nereye baktığını** gösteren sıcaklık haritası. Projeni
 
 ---
 
-## 📈 Deneyler ve Sonuçlar
+## 📈 5. Deneyler ve Sonuçlar
 
 ### Ablation (Denenen yaklaşımlar)
 
@@ -231,18 +236,46 @@ Tam rapor → [`results/classification_report.txt`](results/classification_repor
 
 **Orta zorluk sınıfları (%93-97):** Hız Limiti Sonu (80), Engebeli Yol, Girilmez, Öncelikli Yol, Hız Limiti 60.
 
-### Üretilen Görseller
+### Üretilen Artefaktlar
 
-- **`results/training_history.png`** — Epoch başına accuracy & loss eğrileri
-- **`results/confusion_matrix.png`** — 43×43 normalize karışıklık matrisi
-- **`results/class_distribution.png`** — Eğitim seti sınıf dağılımı
-- **`results/sample_predictions.png`** — Doğru/yanlış tahmin örnekleri
-- **`results/classification_report.txt`** — Sınıf bazlı precision/recall/f1
-- **`results/training_history.json`** — Tüm eğitim metrikleri (arayüzde kullanılır)
+| Dosya | Açıklama |
+|---|---|
+| [`results/classification_report.txt`](results/classification_report.txt) | Sınıf bazlı precision / recall / F1 raporu |
+| [`results/confusion_matrix.png`](results/confusion_matrix.png) | 43×43 normalize karışıklık matrisi |
+| [`results/training_history.png`](results/training_history.png) | Epoch başına accuracy & loss eğrileri |
+| [`results/training_history.json`](results/training_history.json) | Tüm eğitim metrikleri (arayüz kullanır) |
+| [`results/class_distribution.png`](results/class_distribution.png) | Eğitim seti sınıf dağılımı |
+| [`results/sample_predictions.png`](results/sample_predictions.png) | Doğru/yanlış tahmin örnekleri |
+| [`models/trafik_model.keras`](models/trafik_model.keras) | Eğitilmiş CNN v3 (4.98M param, 57 MB) |
 
 ---
 
-## 🌐 Web Arayüzü
+## 🖼️ 6. Sonuç Görselleri
+
+### Eğitim Eğrileri
+
+<p align="center">
+  <img src="results/training_history.png" width="90%" alt="Training history">
+  <br><sub>30 epoch boyunca eğitim & doğrulama doğruluğu (sol) ve kaybı (sağ). Cosine LR + warmup ile yumuşak yakınsama.</sub>
+</p>
+
+### Karışıklık Matrisi
+
+<p align="center">
+  <img src="results/confusion_matrix.png" width="90%" alt="Confusion matrix">
+  <br><sub>12,630 test örneği üzerinde normalize karışıklık matrisi. Köşegen yoğunluğu doğru tahminleri gösterir — neredeyse tamamen köşegende toplanmış.</sub>
+</p>
+
+### Örnek Tahminler
+
+<p align="center">
+  <img src="results/sample_predictions.png" width="80%" alt="Sample predictions">
+  <br><sub>Validation setinden 16 örnek — yeşil çerçeve = doğru, kırmızı = yanlış. G (gerçek), T (tahmin) ve güven yüzdesi.</sub>
+</p>
+
+---
+
+## 🌐 7. Web Arayüzü
 
 Streamlit tabanlı interaktif arayüz **5 sekmeye** sahiptir:
 
@@ -268,7 +301,7 @@ python3 -m streamlit run src/app.py
 
 ---
 
-## 🛠️ Kurulum
+## 🛠️ 8. Kurulum ve Kullanım
 
 ```bash
 # 1) Depoyu klonla
@@ -328,7 +361,7 @@ python src/train.py \
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 9. Proje Yapısı
 
 ```
 trafik-analiz/
@@ -352,38 +385,52 @@ trafik-analiz/
 └── README.md             # Bu dosya
 ```
 
----
+### 🔬 Teknoloji Yığını
 
-## 🎓 Ders Sunumu Hızlı Navigasyon
-
-Sunum esnasında bu dosyadaki aşağıdaki bölümleri sırayla göster:
-
-| Slayt | Dosya / Bölüm | İçerik |
-|---|---|---|
-| Problem & Motivasyon | README §2 | Trafik tanıma neden zor? |
-| Veri seti | README §3 + `class_distribution.png` | GTSRB detayları + dengesizlik |
-| Mimari | README §5.4 + app → **🧠 Model Mimarisi** sekmesi | Katman katman |
-| Eğitim stratejisi | README §5.5 | AdamW + cosine + label smoothing teorisi |
-| Deneyler | README §6 ablation tablosu | v1 → v2 → v3 gelişim |
-| Sonuçlar | `training_history.png` + `confusion_matrix.png` | Eğriler + karışıklıklar |
-| **Demo** | app → **📸 Tahmin** + **🔍 Grad-CAM** | Canlı tahmin + modelin baktığı yer |
-| Yorum | app → **🎓 Yöntem & Sunum** sekmesi | 10 maddelik özet kartlar |
+| Katman | Kütüphaneler |
+|---|---|
+| **Dil & Framework** | Python 3.9, TensorFlow 2.16 / Keras |
+| **GPU Hızlandırma** | tensorflow-macos + tensorflow-metal (Apple M4 Metal) |
+| **Önişleme** | OpenCV (CLAHE), NumPy, Pillow |
+| **Metrikler** | scikit-learn (precision/recall/F1/confusion matrix) |
+| **Web Arayüzü** | Streamlit |
+| **Görselleştirme** | Matplotlib, Seaborn |
+| **Veri İşleme** | Pandas |
 
 ---
 
-## 🔬 Teknoloji Yığını
+## 🎓 10. Ders Sunumu Navigasyonu
 
-- **Python 3.9** + **TensorFlow 2.16 / Keras**
-- **tensorflow-macos** + **tensorflow-metal** (Apple M4 GPU hızlandırması)
-- **OpenCV** — CLAHE kontrast iyileştirme
-- **scikit-learn** — precision / recall / F1 / confusion matrix
-- **Streamlit** — interaktif web arayüzü
-- **Matplotlib / Seaborn** — grafik üretimi
-- **Pandas / NumPy / Pillow** — veri işleme
+Sunum sırası — her slayt için hangi bölüm / dosya / arayüz sekmesine bakılacağı:
+
+| # | Slayt Konusu | Kaynak | Süre önerisi |
+|---|---|---|---|
+| 1 | Problem & Motivasyon | README §2 | 1-2 dk |
+| 2 | Veri seti — GTSRB + dengesizlik | README §3 + inline `class_distribution.png` | 1 dk |
+| 3 | Metodoloji özeti — boru hattı | README §4 (akış şeması) | 1 dk |
+| 4 | Önişleme (CLAHE) | README §4.1 | 1-2 dk |
+| 5 | Veri dengeleme + augmentation | README §4.2 – §4.3 | 1-2 dk |
+| 6 | Model mimarisi — CNN v3 | README §4.4 + **🧠 Model Mimarisi** sekmesi | 2 dk |
+| 7 | Eğitim stratejisi | README §4.5 (AdamW, label smoothing, cosine LR) | 2 dk |
+| 8 | TTA + Grad-CAM + OOD | README §4.6 – §4.8 | 2 dk |
+| 9 | Ablation tablosu — ne denedik | README §5 | 1-2 dk |
+| 10 | Sonuçlar — eğri + confusion matrix | README §6 (inline görseller) | 2 dk |
+| 11 | **Canlı demo** | app → **📸 Tahmin** + **🔍 Grad-CAM** | 3-4 dk |
+| 12 | Yorum + gelecek çalışma | app → **🎓 Yöntem & Sunum** sekmesi | 1 dk |
+
+**Toplam:** ~20 dk anlatım + 4 dk demo + sorular.
+
+### 🎯 Sunumda vurgulanacak ana noktalar
+
+- **Transfer learning neden BAŞARISIZ oldu** (MobileNetV2/EfficientNet %6-50) → domain kayması kavramının kanıtı
+- **Sıfırdan eğitimin neden DAHA İYİ sonuç verdiği** → küçük-boyutlu özelleşmiş veriler için tasarım kararları
+- **Grad-CAM ile yorumlanabilirlik** → "black-box değil, nereye baktığını görebiliyoruz"
+- **OOD tespiti ile dürüstlük** → "modelimizin bilmediği şeyleri bilmesi"
+- **%99.19 test doğruluğu** — GTSRB state-of-the-art'a yakın
 
 ---
 
-## 📚 Referanslar
+## 📚 11. Referanslar
 
 1. **Stallkamp, J., Schlipsing, M., Salmen, J., & Igel, C. (2012).** The German Traffic Sign Recognition Benchmark. *IJCNN*.
 2. **Simonyan, K., & Zisserman, A. (2014).** Very Deep Convolutional Networks for Large-Scale Image Recognition (VGG). *arXiv:1409.1556*.

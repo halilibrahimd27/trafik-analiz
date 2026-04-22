@@ -1,0 +1,57 @@
+GTSRB Trafik İşareti Tanıma — Sınıflandırma Raporu
+======================================================================
+
+Doğruluk  : 99.19%
+Kesinlik  : 99.21%
+Duyarlılık: 99.19%
+F1 Skoru  : 99.16%
+
+                            precision    recall  f1-score   support
+
+      Hız Limiti (20 km/s)       1.00      1.00      1.00        60
+      Hız Limiti (30 km/s)       1.00      1.00      1.00       720
+      Hız Limiti (50 km/s)       1.00      1.00      1.00       750
+      Hız Limiti (60 km/s)       1.00      0.99      0.99       450
+      Hız Limiti (70 km/s)       1.00      1.00      1.00       660
+      Hız Limiti (80 km/s)       0.99      1.00      0.99       630
+ Hız Limiti Sonu (80 km/s)       0.99      1.00      1.00       150
+     Hız Limiti (100 km/s)       1.00      1.00      1.00       450
+     Hız Limiti (120 km/s)       1.00      1.00      1.00       450
+              Geçiş Yasağı       1.00      1.00      1.00       480
+ 3.5 Ton Üzeri Araç Yasağı       1.00      1.00      1.00       660
+     Öncelikli Yol Kavşağı       0.93      0.99      0.96       420
+             Öncelikli Yol       1.00      0.98      0.99       690
+                   Yol Ver       0.99      1.00      1.00       720
+                       Dur       0.97      1.00      0.98       270
+              Araç Giremez       1.00      0.99      0.99       210
+3.5 Ton Üzeri Araç Giremez       1.00      1.00      1.00       150
+                  Girilmez       1.00      0.97      0.99       360
+             Genel Tehlike       0.99      0.97      0.98       390
+      Sola Tehlikeli Viraj       1.00      1.00      1.00        60
+      Sağa Tehlikeli Viraj       0.97      1.00      0.98        90
+          Ardışık Virajlar       0.92      1.00      0.96        90
+              Engebeli Yol       1.00      0.97      0.99       120
+                Kaygan Yol       1.00      1.00      1.00       150
+        Sağdan Daralan Yol       0.99      0.99      0.99        90
+             Yol Çalışması       0.98      1.00      0.99       480
+           Trafik Işıkları       0.96      0.98      0.97       180
+               Yaya Geçidi       0.97      0.50      0.66        60
+              Çocuk Geçidi       0.99      1.00      0.99       150
+           Bisiklet Geçidi       1.00      1.00      1.00        90
+            Buzlanma / Kar       1.00      0.99      1.00       150
+      Yaban Hayvanı Geçidi       1.00      0.99      1.00       270
+       Tüm Yasakların Sonu       0.98      1.00      0.99        60
+              Sağa Dönünüz       0.99      1.00      0.99       210
+              Sola Dönünüz       1.00      1.00      1.00       120
+             İleri Gidiniz       1.00      0.99      1.00       390
+           İleri veya Sağa       1.00      0.97      0.99       120
+           İleri veya Sola       0.97      0.98      0.98        60
+            Sağdan Geçiniz       1.00      1.00      1.00       690
+            Soldan Geçiniz       1.00      1.00      1.00        90
+              Dönel Kavşak       1.00      1.00      1.00        90
+         Geçiş Yasağı Sonu       0.98      1.00      0.99        60
+  3.5 Ton Üzeri Yasak Sonu       1.00      1.00      1.00        90
+
+                  accuracy                           0.99     12630
+                 macro avg       0.99      0.98      0.98     12630
+              weighted avg       0.99      0.99      0.99     12630

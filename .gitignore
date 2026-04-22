@@ -1,11 +1,11 @@
-# Veri seti (çok büyük, ayrıca indirilmeli)
+# Veri seti (cok buyuk, ayrica indirilmeli)
 data/
 
-# Eğitilmiş model dosyaları
-models/
-
-# Sonuç görselleri (üretilir)
-results/
+# Eski / ara model dosyalari (sadece final modeli tut)
+models/best_model.keras
+models/best_model_phase1.keras
+models/best_model_phase2.keras
+models/trafik_model_v2_clean.keras
 
 # Python
 __pycache__/
@@ -36,10 +36,10 @@ env/
 .idea/
 *.swp
 
-# TensorFlow geçici dosyalar
+# TensorFlow gecici dosyalar
 *.h5
 *.pb
-tensorboard/
+results/tensorboard/
 
-# Log dosyaları
+# Log dosyalari
 *.log

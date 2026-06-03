@@ -45,7 +45,6 @@ def get_tta_augmentations():
     daha kararli bir sonuc elde etme teknigi.
     """
     def identity(img):      return img
-    def rot_p5(img):        return tf.image.rot90(img, k=0)  # placeholder
     def zoom_out(img):
         # Hafif pad + merkeze kirp (zoom-out etkisi)
         h = tf.shape(img)[0]
@@ -147,10 +146,11 @@ def get_class_counts(data_dir, num_classes=43):
 
 # -- Oversampling -------------------------------------------------------------
 
-def _oversample_directory(data_dir, img_size, target_per_class=1200):
-    """
-    Az ornekli siniflari offline augmente ederek hedef sayiya cikarir.
-    Tum siniflari numpy array olarak dondurur.
+def _load_all_originals(data_dir, img_size):
+    """Tum ORIJINAL egitim goruntulerini yukler (augmentation YOK).
+
+    Returns:
+        (images, labels): images float32 [0,1] sekli (N, H, W, 3); labels int32 (N,).
     """
     from PIL import Image as PILImage
 
@@ -158,46 +158,59 @@ def _oversample_directory(data_dir, img_size, target_per_class=1200):
     all_images = []
     all_labels = []
 
-    aug_layer = get_augmentation_layer()
-
     for cls_idx in range(43):
         cls_dir = os.path.join(train_dir, str(cls_idx))
         if not os.path.isdir(cls_dir):
             continue
-
-        cls_images = []
-        files = [f for f in os.listdir(cls_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.ppm'))]
+        files = [f for f in os.listdir(cls_dir)
+                 if f.lower().endswith(('.png', '.jpg', '.jpeg', '.ppm'))]
         for fname in files:
-            img = PILImage.open(os.path.join(cls_dir, fname)).convert("RGB").resize((img_size[1], img_size[0]))
-            cls_images.append(np.array(img, dtype=np.float32) / 255.0)
+            img = PILImage.open(os.path.join(cls_dir, fname)).convert("RGB").resize(
+                (img_size[1], img_size[0]))
+            all_images.append(np.array(img, dtype=np.float32) / 255.0)
+            all_labels.append(cls_idx)
 
-        if not cls_images:
-            continue
+    images = np.stack(all_images, axis=0)
+    labels = np.array(all_labels, dtype=np.int32)
+    return images, labels
 
-        cls_arr = np.stack(cls_images)
+
+def _oversample_arrays(x, y, target_per_class=1200):
+    """Verilen (zaten yuklenmis) dizileri sinif basina hedef sayiya cikarir.
+
+    Augmente kopyalar YALNIZCA verilen ornekler uzerinden uretilir; bu yuzden
+    bu fonksiyona sadece EGITIM bolumu verilmelidir — boylece augmente bir
+    goruntu dogrulama setine sizamaz (leakage onlenir).
+    """
+    aug_layer = get_augmentation_layer()
+    out_images = []
+    out_labels = []
+
+    for cls_idx in range(43):
+        cls_arr = x[y == cls_idx]
         n_original = len(cls_arr)
+        if n_original == 0:
+            continue
 
         if n_original < target_per_class:
             n_needed = target_per_class - n_original
             aug_images = []
             for _ in range(n_needed):
                 idx = np.random.randint(0, n_original)
-                src = cls_arr[idx:idx+1]
-                augmented = aug_layer(src, training=True).numpy()
-                augmented = np.clip(augmented, 0.0, 1.0)
+                src = cls_arr[idx:idx + 1]
+                augmented = np.clip(aug_layer(src, training=True).numpy(), 0.0, 1.0)
                 aug_images.append(augmented[0])
-            if aug_images:
-                cls_arr = np.concatenate([cls_arr, np.stack(aug_images)], axis=0)
+            cls_arr = np.concatenate([cls_arr, np.stack(aug_images)], axis=0)
 
-        all_images.append(cls_arr)
-        all_labels.extend([cls_idx] * len(cls_arr))
+        out_images.append(cls_arr)
+        out_labels.extend([cls_idx] * len(cls_arr))
 
         if cls_idx % 10 == 0:
             print(f"  [Oversampling] Sinif {cls_idx}: {n_original} -> {len(cls_arr)} ornek")
 
-    images = np.concatenate(all_images, axis=0)
-    labels = np.array(all_labels, dtype=np.int32)
-    print(f"[Veri] Oversampling sonrasi toplam: {len(labels):,} ornek")
+    images = np.concatenate(out_images, axis=0)
+    labels = np.array(out_labels, dtype=np.int32)
+    print(f"[Veri] Oversampling sonrasi egitim toplami: {len(labels):,} ornek")
     return images, labels
 
 
@@ -257,30 +270,48 @@ def load_gtsrb_from_directory(data_dir, img_size=(64, 64), batch_size=64, augmen
 
 
 def load_balanced_dataset(data_dir, img_size=(64, 64), batch_size=64, target_per_class=1200,
-                           apply_clahe=True, online_augment=True):
+                           apply_clahe=True, online_augment=True, val_split=0.2):
     """
-    Oversampled + balanced veri seti yukler.
-    Az ornekli siniflari augmentation ile cogaltir, opsiyonel CLAHE uygular.
-    80/20 train/val split yapar.
-    """
-    print("[Veri] Dengelenmis veri seti hazirlaniyor...")
-    images, labels = _oversample_directory(data_dir, img_size, target_per_class)
+    Dengelenmis veri seti yukler — SIZINTISIZ (leakage-free) sira ile:
 
+      1. Tum ORIJINAL goruntuler yuklenir (augmentation yok).
+      2. Sinif-bazli (stratified) %val_split kadar dogrulama ayrilir (orijinaller).
+      3. Oversampling YALNIZCA egitim bolumune uygulanir.
+
+    Boylece bir goruntunun augmente kopyasi egitimde, orijinali dogrulamada
+    olamaz; dogrulama metrigi gercek genellemeyi olcer.
+    """
+    print("[Veri] Dengelenmis veri seti hazirlaniyor (once split, sonra oversample)...")
+    x_all, y_all = _load_all_originals(data_dir, img_size)
+
+    # -- Sinif bazli (stratified) train/val ayrimi — orijinaller uzerinden ----
+    rng = np.random.RandomState(42)
+    train_idx, val_idx = [], []
+    for cls_idx in range(43):
+        cls_pos = np.where(y_all == cls_idx)[0]
+        rng.shuffle(cls_pos)
+        n_val = max(1, int(round(len(cls_pos) * val_split)))
+        val_idx.extend(cls_pos[:n_val].tolist())
+        train_idx.extend(cls_pos[n_val:].tolist())
+
+    x_train, y_train = x_all[train_idx], y_all[train_idx]
+    x_val,   y_val   = x_all[val_idx],   y_all[val_idx]
+
+    # -- Oversampling: SADECE egitim bolumu (sizinti onleme) -----------------
+    x_train, y_train = _oversample_arrays(x_train, y_train, target_per_class)
+
+    # -- CLAHE (deterministik, per-image — sizinti olusturmaz) ---------------
     if apply_clahe:
         print("[Veri] CLAHE kontrast iyilestirme uygulaniyor...")
-        images = apply_clahe_batch(images)
+        x_train = apply_clahe_batch(x_train)
+        x_val   = apply_clahe_batch(x_val)
 
-    # Shuffle & split
-    n = len(labels)
-    indices = np.random.RandomState(42).permutation(n)
-    images = images[indices]
-    labels = labels[indices]
+    # -- Egitim bolumunu karistir --------------------------------------------
+    perm = np.random.RandomState(43).permutation(len(y_train))
+    x_train, y_train = x_train[perm], y_train[perm]
 
-    split = int(n * 0.8)
-    x_train, x_val = images[:split], images[split:]
-    y_train, y_val = labels[:split], labels[split:]
-
-    print(f"[Veri] Egitim: {len(y_train):,} | Dogrulama: {len(y_val):,}")
+    print(f"[Veri] Egitim: {len(y_train):,} (oversampled) | "
+          f"Dogrulama: {len(y_val):,} (orijinal, sizintisiz)")
 
     AUTOTUNE = tf.data.AUTOTUNE
     num_classes = 43

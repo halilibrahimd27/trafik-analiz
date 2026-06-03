@@ -64,7 +64,7 @@ def build_model(
         → Dense(512, relu) + BN + Dropout(0.5)
         → Dense(num_classes, softmax)
 
-    ~4.1M parametre, tamami egitilebilir.
+    ~4.98M parametre, tamami egitilebilir.
 
     Args:
         num_classes:      Cikti sinif sayisi.

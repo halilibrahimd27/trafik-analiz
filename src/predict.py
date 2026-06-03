@@ -40,6 +40,28 @@ def _print_box(title, rows, width=62):
     print(f"╚{border}╝\n")
 
 
+# ── CLAHE ön işleme (eğitim ile aynı) ─────────────────────────────────────────
+
+def _apply_clahe(img_np: np.ndarray) -> np.ndarray:
+    """Tek görüntüye CLAHE uygular (eğitim/değerlendirme ile birebir aynı).
+
+    Model CLAHE ön işlemeli görüntülerle eğitildiği için, çıkarımda da aynı
+    dönüşüm uygulanmalıdır; aksi halde train/serve uyumsuzluğu (skew) oluşur.
+    cv2 yoksa görüntü olduğu gibi döndürülür.
+    """
+    try:
+        import cv2
+    except ImportError:
+        print("[Predict] Uyarı: opencv yok, CLAHE atlanıyor (eğitimle uyumsuz olabilir).")
+        return img_np
+    img_uint8 = (np.clip(img_np, 0.0, 1.0) * 255).astype(np.uint8)
+    lab = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2LAB)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    return enhanced.astype(np.float32) / 255.0
+
+
 # ── Çıkarım fonksiyonu ────────────────────────────────────────────────────────
 
 def predict_image(
@@ -50,6 +72,7 @@ def predict_image(
     top_k: int = 5,
     show_plot: bool = True,
     save_plot: bool = True,
+    apply_clahe: bool = True,
 ) -> list:
     """Tek bir görüntü üzerinde çıkarım yapar ve en yüksek K tahmini döner.
 
@@ -61,6 +84,7 @@ def predict_image(
         top_k:       Döndürülecek en iyi tahmin sayısı.
         show_plot:   True ise matplotlib penceresi açılır (GUI ortamı gerekir).
         save_plot:   True ise grafik results/ altına kaydedilir.
+        apply_clahe: True ise CLAHE ön işleme uygulanır (eğitim ile aynı; önerilir).
 
     Returns:
         ``[(sınıf_adı, güven_skoru), ...]`` — azalan güven sırasında.
@@ -95,6 +119,8 @@ def predict_image(
         Image.BILINEAR,
     )
     img_array = np.array(img_resized, dtype=np.float32) / 255.0
+    if apply_clahe:
+        img_array = _apply_clahe(img_array)   # eğitim ile aynı ön işleme
     img_batch  = np.expand_dims(img_array, axis=0)
 
     # ── Çıkarım ──────────────────────────────────────────────────────────────
@@ -224,6 +250,12 @@ def main() -> None:
         dest="no_show",
         help="Matplotlib penceresini açma (sunucu/headless ortamı için)",
     )
+    parser.add_argument(
+        "--no-clahe",
+        action="store_false",
+        dest="apply_clahe",
+        help="CLAHE ön işlemeyi kapat (eğitimle uyumsuz; sadece test/karşılaştırma için)",
+    )
     args = parser.parse_args()
 
     try:
@@ -235,6 +267,7 @@ def main() -> None:
             top_k=5,
             show_plot=not args.no_show,
             save_plot=True,
+            apply_clahe=args.apply_clahe,
         )
     except FileNotFoundError as exc:
         print(f"\n[Hata] {exc}")

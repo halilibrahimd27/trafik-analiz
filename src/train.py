@@ -2,7 +2,7 @@
 Trafik isareti tanima modeli — gelistirilmis egitim hatti (v3).
 
 Ozellikler:
-  - 4 bloklu CNN v3 (64x64 giris, ~4M param)
+  - 4 bloklu CNN v3 (64x64 giris, ~4.98M param)
   - Label smoothing (0.1) + AdamW
   - Oversampling ile sinif dengeleme
   - Online augmentation
@@ -242,7 +242,8 @@ def train(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Trafik isareti CNN v3 egitimi")
-    parser.add_argument("--epochs", type=int, default=45)
+    parser.add_argument("--epochs", type=int, default=30,
+                        help="Egitim epoch sayisi (yayinlanan sonuc: 30)")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, dest="batch_size")
     parser.add_argument("--lr", type=float, default=1e-3, help="Baslangic ogrenme orani")
     parser.add_argument("--augment", action="store_true", help="Online augmentation (standart mod)")

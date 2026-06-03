@@ -16,7 +16,7 @@ for d in [DATA_DIR, MODEL_DIR, RESULT_DIR]:
 # ── Model parametreleri ─────────────────────────────────────────────────────
 IMG_SIZE   = (64, 64)      # Giriş görüntü boyutu (v3: 48 → 64, daha fazla detay)
 BATCH_SIZE = 64
-EPOCHS     = 45
+EPOCHS     = 30            # Yayınlanan CNN v3 sonucu 30 epoch ile elde edildi
 NUM_CLASSES = 43           # GTSRB sınıf sayısı
 LEARNING_RATE = 1e-3
 LABEL_SMOOTHING = 0.1

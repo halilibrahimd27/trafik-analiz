@@ -41,5 +41,8 @@ env/
 *.pb
 results/tensorboard/
 
+# Tekil tahmin ciktilari (predict.py uretir)
+results/predict_*.png
+
 # Log dosyalari
 *.log

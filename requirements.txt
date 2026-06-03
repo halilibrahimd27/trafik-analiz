@@ -1,6 +1,9 @@
 # Derin Öğrenme
-tensorflow-macos>=2.12.0
-tensorflow-metal>=1.0.0
+# Apple Silicon (M-serisi) -> tensorflow-macos + Metal GPU hızlandırma
+tensorflow-macos>=2.12.0; sys_platform == "darwin" and platform_machine == "arm64"
+tensorflow-metal>=1.0.0; sys_platform == "darwin" and platform_machine == "arm64"
+# Diğer tüm platformlar (Linux / Windows / Intel Mac) -> standart tensorflow
+tensorflow>=2.12.0; sys_platform != "darwin" or platform_machine != "arm64"
 
 # Veri işleme
 numpy>=1.23.0

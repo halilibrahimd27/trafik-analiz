@@ -212,15 +212,16 @@ st.markdown(_theme_vars(_dark), unsafe_allow_html=True)
 st.markdown(_MAIN_CSS, unsafe_allow_html=True)
 
 
-# Marka SVG logosu (tema rengine uyum sağlar)
-BRAND_LOGO = """
-<svg class="brand-logo" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="44" height="44" rx="11" fill="var(--accent)"/>
-  <circle cx="22" cy="22" r="12" fill="none" stroke="#ffffff" stroke-width="2.6"/>
-  <path d="M22 14.5 L22 24" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>
-  <circle cx="22" cy="29" r="1.7" fill="#ffffff"/>
-</svg>
-"""
+# Marka SVG logosu — TEK SATIR (çok satır olursa markdown araya boş satır koyup
+# sonraki HTML'i kod bloğu sanıyor). Tema rengine uyum sağlar.
+BRAND_LOGO = (
+    '<svg class="brand-logo" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">'
+    '<rect width="44" height="44" rx="11" fill="var(--accent)"/>'
+    '<circle cx="22" cy="22" r="12" fill="none" stroke="#ffffff" stroke-width="2.6"/>'
+    '<path d="M22 14.5 L22 24" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>'
+    '<circle cx="22" cy="29" r="1.7" fill="#ffffff"/>'
+    '</svg>'
+)
 
 
 # ── Model / yardımcılar ───────────────────────────────────────────────────

@@ -58,8 +58,13 @@ def make_gradcam_heatmap(
 
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(image_batch, training=False)
+        # Keras 3 (TF 2.16+) model ciktilarini liste icinde sarabilir — tensore indir
+        if isinstance(conv_outputs, (list, tuple)):
+            conv_outputs = conv_outputs[0]
+        if isinstance(predictions, (list, tuple)):
+            predictions = predictions[0]
         if pred_index is None:
-            pred_index = tf.argmax(predictions[0])
+            pred_index = int(tf.argmax(predictions[0]))
         class_channel = predictions[:, pred_index]
 
     # Gradient: class score -> feature map

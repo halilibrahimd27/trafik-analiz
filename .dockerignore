@@ -1,0 +1,28 @@
+# Veri seti (çok büyük — runtime'da volume olarak mount edilir)
+data/
+
+# Git & IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+.claude/
+
+# Python önbellek / sanal ortam
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Eski / kullanılmayan model dosyaları (yalnızca trafik_model.keras kullanılır)
+models/best_model*.keras
+models/trafik_model_v2_clean.keras
+
+# Üretilen tekil tahmin görselleri ve loglar
+results/predict_*.png
+*.log
+
+# macOS
+.DS_Store

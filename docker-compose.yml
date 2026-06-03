@@ -1,0 +1,21 @@
+# Trafik İşareti Tanıma Sistemi — Docker Compose
+# Çalıştırma:  docker compose up --build
+# Arayüz:      http://localhost:8501
+services:
+  traffic-sign:
+    build: .
+    image: trafik-analiz:latest
+    container_name: trafik-analiz
+    ports:
+      - "8501:8501"
+    volumes:
+      # GTSRB verisi (opsiyonel) — arayüzdeki "hazır örnekler" ve sol panel için.
+      # Veri yoksa uygulama yine çalışır; yalnızca fotoğraf yükleme aktif olur.
+      - ./data:/app/data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s

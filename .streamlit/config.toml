@@ -1,0 +1,11 @@
+# Kurumsal açık tema — Streamlit temel widget'ları için tutarlı renkler
+[theme]
+base = "light"
+primaryColor = "#1d4ed8"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f1f5f9"
+textColor = "#0f172a"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
